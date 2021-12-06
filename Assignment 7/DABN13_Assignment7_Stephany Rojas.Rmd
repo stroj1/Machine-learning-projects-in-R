@@ -1,0 +1,414 @@
+---
+title: "DABN13_NN"
+output: html_document
+name: Stephany Rojas Gerena
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Installing Keras
+Follow the instructions at [Keras installation](https://web.stanford.edu/~hastie/ISLR2/keras-instructions.html)
+## Preamble: Data
+In this lab we are going to try to predict if light beer purchased in the US is BUD light.
+For help you have some explanatory variables of the purchaser, location of the purchase.
+These are
+* market           - where the beer is bought
+* buyertype        - who is the buyer () 
+* income           - ranges of income
+* childrenUnder6   - does the buyer have children under 6 years old
+* children6to17    - does the buyer have children between 6 and 17
+* age              - bracketed age groups
+* employment       - fully employed, partially employed, no employment.
+* degree           - level of occupation
+* occuptation      - which sector you are employed in
+* ethnic           - white, asian, hispanic, black or other
+* microwave        - own a microwave
+* dishwasher       - own a dishwasher
+* tvcable          - what type cable tv subscription you have
+* singlefamilyhome - are you in a single family home
+* npeople          - number of people you live with 1,2,3,4, +5
+
+```{r }
+lb <- read.csv("LightBeer.csv")
+brand <- factor(lb$beer_brand)
+y <- brand=="BUD LIGHT"
+demog <- lb[,-(1:9)]
+# relevel some things
+for(name.col in colnames(demog)){
+  demog[, name.col] <- as.factor(demog[, name.col] )
+}
+```
+
+
+We also split the data into a training and testing part.
+```{r }
+
+library(caret)
+set.seed(1)
+train.test = sample(length(y),length(y))
+i.train <- ceiling(length(train.test)*3/4)
+train.index <- train.test[1:i.train]
+test.index <- train.test[(i.train+1):length(train.test)]
+X.train = model.matrix( ~ -1 + .,data= demog[train.index,])
+y.train <- y[train.index]
+
+scaling.X.test <- preProcess(X.train, method = c("center", "scale"))
+
+X.train <- predict(scaling.X.test, newdata = X.train)
+X.test = model.matrix( ~ -1 + .,data= demog[test.index,])
+scaling.X.test <- preProcess(X.test, method = c("center", "scale"))
+X.test <- predict(scaling.X.test, newdata = X.test)
+y.test <- y[test.index]
+
+```
+
+
+
+
+
+
+## Part 1) Neural Network
+We will now start building a neural network for predictions for the label class.
+This data set is rather large so we will reduce to the size when fitting the initial models, by using a subsample of the training data.
+```{r }
+
+set.seed(1)
+train.small = sample(length(y.train)[1],ceiling(0.3*length(y.train)))
+X.train.small <- X.train[train.small,]
+y.train.small <- y.train[train.small]
+
+```
+
+
+
+
+## Task 1a) 
+We now build our very first and very small NN `model1`.
+To model1 add three layers, two hidden with $30,15$ hidden units and a outputlayer.
+For the two hidden layers you should use activation function `'relu'` choose a suitable activation for the output layer given we have a classification function. See this link [activation functions](https://keras.io/api/layers/activations/) for activation functions. Hint this the output layer has the same activation function as we used in logistic regression.
+```{r }
+library(keras)
+# Initialize a first model
+model1 = keras_model_sequential()
+# Add layers to the model
+model1 %>% 
+  layer_dense(units=30, activation='relu', name="hidden.layer.1",input_shape = c(dim(X.train.small)[2])) %>%  
+  layer_dense(units=15, activation='relu', name="hidden.layer.2") %>% 
+  layer_dense(units=1,activation='sigmoid', name="output.layer")
+
+
+
+```
+
+
+## Task 1b) 
+
+From [https://keras.io/api/losses/probabilistic_losses/](losses) select a suitable loss function for our classification problem. For optimization function use adam with learning rate $0.0005$:
+```{r }
+myopt = optimizer_adam(learning_rate=0.0005)
+model1 %>% compile(
+  loss = 'binary_crossentropy', 
+  optimizer = myopt,
+  metrics = 'accuracy'
+)
+
+
+```
+
+
+
+## Task 1c)
+Now train the model using $250$ epochs, a batch_size of $2^8$, and use $25\%$ of the data for validation.
+Describe the difference between the validation loss and training loss and explain it (the difference that is).
+
+```{r }
+
+model1.fit = model1 %>% fit(
+  x = as.matrix(X.train.small), 
+  y = as.matrix(y.train.small),
+  epochs=250,
+  batch_size=2^8,
+  validation_split=0.25
+)  
+task1c.explain.difference.between.loss.val_loss <-"As we see in the graph, the validation loss is the green line and the training loss is the blue line. We se that validation loss decreases until epoch 60 and then starts increasing again, whereas training loss is always decreasing. So in epoch 60-70 we can see that validation loss starts to increas but training loss keeps decreasing. The validation loss measure the ability to predict in new data"
+
+```
+
+## Task 1d)
+In Lecture 10 we used early stopping to avoid overfitting. Apply this here for `model1b` which should have identical setup as `model1` except for having early stoppage with patience set to twenty.
+One can extract number of epochs from the length of `model1.fit$metrics$loss`.
+In which epoch did the model training procedure stop?
+```{r }
+model1b = keras_model_sequential()
+
+
+model1b %>% 
+  layer_dense(units=30, activation='relu', name="hidden.layer.1b",input_shape = c(dim(X.train.small)[2])) %>%  
+  layer_dense(units=15, activation='relu', name="hidden.layer.2b") %>% 
+  layer_dense(units=1,activation='sigmoid', name="output.layerb") %>%
+  compile(
+  loss = 'binary_crossentropy', 
+  optimizer = myopt,
+  metrics = 'accuracy'
+)
+
+
+model1b.fit = model1b %>% fit(
+  x = as.matrix(X.train.small), 
+  y = as.matrix(y.train.small),
+  epochs=250,
+  batch_size=2^8,
+  validation_split=0.25,
+  callbacks=list(callback_early_stopping(patience=20))
+)  
+task1d.whatephocstopped <- "The model stop at Epoch 59/250 with an accuracy: 0.8220"
+
+```
+## Task 1e)
+Even though the training is not complete let us evaluate the model on the test data to see how it would perform. We will also create a prediction, using the Bayes classifier, and create the resulting confusion matrix on the test data. What is the accuracy of the model for validation training data and test data?
+Hint the training validation accuracy can be extracted from `model1.fit`.
+```{r }
+pred.model1 <- model1b %>% predict(x= X.test)
+res.model1 <-  model1b %>%  evaluate(x= X.test, y=y.test)
+CM.model1 <- confusionMatrix(factor(y.test), factor(pred.model1>0.5))
+task1.e.difference.accuracy <-abs(model1b.fit$metrics$val_accuracy[length(model1b.fit$metrics$val_accuracy)]-CM.model1$overall[1]) 
+
+```
+## Task 1f)
+
+In the lectures we have utilized the regularization penalties for avoid overfitting. Here we will use $l2$ regularization to update the weights. Add the options to the hidden layers with regularization factor set to $l2.pen$. Then compile and fit this regularized model otherwise the same parameters as 
+in Task 1d.
+
+
+```{r }
+
+model2 = keras_model_sequential()
+ #Add layers to the model
+ l2.pen <- 0.005
+ 
+model2 %>% 
+  layer_dense(units=30, activation='relu', name="hidden.layer.1", input_shape = c(dim(X.train.small)[2]),kernel_regularizer = regularizer_l2(l2.pen)) %>%  
+  layer_dense(units=15, activation='relu', name="hidden.layer.2",kernel_regularizer = regularizer_l2(l2.pen)) %>% 
+  layer_dense(units=1,activation='sigmoid', name="output.layer",kernel_regularizer = regularizer_l2(l2.pen))
+
+
+myopt = optimizer_adam(learning_rate = 0.0005)
+model2 %>% compile(loss = "binary_crossentropy",
+ optimizer = myopt,
+ metrics = 'accuracy'
+)
+
+
+model2.fit = model2 %>% fit(
+ x = as.matrix(X.train.small),
+ y = as.matrix(y.train.small),
+ epochs = 250, batch_size = 2^8, validation_split = 0.25,
+ callbacks = list(callback_early_stopping(patience = 20))
+)
+
+
+
+```
+
+## Task 1g)
+In Task 1e) we compared the accuracy of the models, however this is bad measure when data is not well balanced (similar number of true and false). Instead one can use the cross entropy for the binomial distribution (minus the average log likelihood of the model). In fact this is what we use to fit the model with in this task (for model1 this is the `loss`).
+To compare the result of this model when evaluating on the test data we don't want to use `loss` from `evaluate` since this includes the $l2$ penalty.  In the library `library(MLmetrics)` the function `LogLoss` computes this loss. Compare the difference in cross entropy between `model1` and `model2` on the test data.
+Look in the help on `LogLoss` and compute the cross-entropy loss for `model2` on the test data.
+
+
+```{r }
+library(MLmetrics)
+pred.model2 <- model2 %>% predict(x = X.test) 
+logloss.model2 <- LogLoss(y_true = y.test,y_pred = pred.model2)
+task1g.difference.in.entropy.between.1.2 <- abs(model1b.fit$metrics$loss[length(model1b.fit$metrics$loss)]-logloss.model2)
+
+```
+
+## Part 2) Prediction with a NN
+
+In this part we will build our prediction "manually", by extracting weights and building our own activation functions for our latest model `model2`.
+
+## Task 2a)
+
+We start by creating our own `ReLU`, for the hidden layers, and function `sigmoid` function for the output layer. Hint `ReLU` `pmax` is a useful function.
+
+```{r }
+ReLU <- function(x){
+  return(matrix(pmax(0, x), nrow = dim(x)[1]))
+}
+sigmoid <- function(x){
+  return(1 / (1 + exp(-x)))
+}
+  
+
+```
+
+
+## Task 2b)
+In the sides for lecture 9 (Page 4-12 in particular) we go through how to layers of a NN are built now you are supposed use these equations to get the probabilities of $y$ given $X$.
+Using `get_weights()` function on your model object returns the weights and biases are stored in list. The output is a list.  Collect the correct weight and biases in matrices and vector listed below. Check the dimension of the matrices (weights) and vector (biases) to figure out which how the list is structured. Remember that the hidden layer uses the previous layer as input. Hint you can use `dim` to check that your weights have the correct matrix, and `length` for the vectors.
+To ensure that you got the correct result you can compare with the output of `predict`.
+```{r }
+rep.col<-function(x,n){
+   matrix(rep(x,each=n), ncol=n, byrow=TRUE)
+}
+weight.and.bias <- get_weights(model2)
+ alpha_01 <- weight.and.bias[[2]]
+ alpha_1 <- weight.and.bias[[1]]
+ alpha_02 <- weight.and.bias[[4]]
+ alpha_2 <- weight.and.bias[[3]]
+ beta_0 <- weight.and.bias[[6]]
+ beta_Z <- weight.and.bias[[5]]
+ Z_1 <- ReLU(t(alpha_1)%*%t(X.train) + rep.col(alpha_01,  nrow(X.train)))
+ Z_2 <- ReLU(t(alpha_2)%*%(Z_1) +  rep.col(alpha_02, ncol(Z_1)))
+ T   <- sigmoid(t(beta_Z)%*%(Z_2) +  rep.col(beta_0 , ncol(Z_2)))
+ pred.own <-  sum((t(T) - predict(model2, x = X.train))^2)
+
+```
+
+## Part 3) larger with a NN
+We will now test building a bit larger NN model.
+## Task 3a)
+
+Start with building a model with 4 hidden layer with hidden units 
+$180,90,90,90$.  Let all other characteristics of the model be identical to 
+model 2. After you compiled and fitted this model, get predictions on the 
+test data and compute the log loss on the test data.
+Did we gain any improvement over the previous model?
+
+```{r }
+
+model3 = keras_model_sequential()
+l2.pen <- 0.008
+model3 %>%
+ layer_dense(units = 180, activation = 'relu', input_shape = c(dim(X.train.small)[2]), kernel_regularizer = regularizer_l2(l2.pen), name="hidden.layer.1") %>%
+ layer_dense(units = 90, activation = 'relu', kernel_regularizer = regularizer_l2(l2.pen),  name="hidden.layer.2") %>%
+ layer_dense(units = 90, activation = 'relu', kernel_regularizer = regularizer_l2(l2.pen), name="hidden.layer.3") %>%
+ layer_dense(units = 90, activation = 'relu', kernel_regularizer = regularizer_l2(l2.pen), name="hidden.layer.4") %>%
+ layer_dense(units = 1, activation = 'sigmoid', kernel_regularizer = regularizer_l2(l2.pen), name="output.layer") 
+ 
+
+myopt = optimizer_adam(learning_rate = 0.0005)
+model3 %>% compile(loss = "binary_crossentropy",
+ optimizer = myopt,
+ metrics = 'accuracy'
+)
+
+
+
+model3.fit = model3 %>% fit(
+ x = as.matrix(X.train.small),
+ y = as.matrix(y.train.small),
+ epochs = 250, batch_size = 2^8, validation_split = 0.25,
+ callbacks = list(callback_early_stopping(patience = 20))
+)
+
+
+ 
+ pred.model3    <-   model3 %>% predict(x = X.test)
+ logloss.model3 <-   LogLoss(y_pred = pred.model3, y_true = y.test)
+ task3a.improvment.model  <-"The log loss of model 3 is lower than model 2, so we did gain an improvement compared to the previous model"
+ 
+
+```
+
+
+## Task 3b) 
+NN is a non-parametric method (if you have too many parameters you are non-parametric...)
+as such it requires a lot of data. So now lets try the same model but with the full `X.train`.
+We start the forth model at the third model by `model4 <- model3`, as such the training will start from the previous stopping point. How can you see that the model4 now start from the end point of model3? Did we improve the fit by just adding more data?
+
+
+
+```{r }
+
+tensorflow::set_random_seed(42)
+model4 <- model3
+fit.model4 = model4 %>% fit(
+  x = as.matrix(X.train),
+  y = as.matrix(y.train),
+  epochs = 250, 
+  batch_size = 2^8, 
+  validation_split = 0.25
+)  
+ pred.model4    <-   model4 %>% predict(x = X.test)
+ logloss.model4 <-   LogLoss(y_pred = pred.model4, y_true = y.test)
+Task3bmodel4.start.from.model3 <- "We can see that the validation curve doesn't drop at the begining as the previous models and the learning rate is the same one as the previous model, so it shows that it is a continuation from the previous model"
+Task3bdifference.fit.with.more.data <- "The log loss of model 4 is lower than model 3, so we did gain an improvement compared to the previous model"
+
+```
+
+
+## Task 3c) 
+Now to get a bit more data let us run the final model again but this time without a validation data sets for as $40$ epochs.
+```{r }
+model5 <- model4
+
+fit.model5 = model5 %>% fit(
+x = as.matrix(X.train),
+ y = as.matrix(y.train),
+ epochs = 40,
+ batch_size = 2^8,
+ validation_split = 0
+)  
+ pred.model5    <-   model5 %>% predict(x = X.test)
+ logloss.model5 <-   LogLoss(y_pred = pred.model5, y_true = y.test)
+
+
+```
+
+
+## Task 3d)
+In conclusion which model performed the best? Which models performed approximately equally good as the best
+model?
+
+```{r }
+Tasdk3d.prefomed.best <- "The model with the lowest log loss was model5 with a logloss of 0.32"
+Tasdk3d.about.the.best <- "The model that performs close to the best was model 4, with the next lowest logloss of 0.33"
+```
+
+
+### Part 4)
+Now for comparison we are going to examine how logistic regression with $l1$ penalty performance.
+We start by creating the data with all predictors and there cross interactions:
+
+```{r }
+library(Matrix)
+X.lasso <- sparse.model.matrix( 
+    ~ -1+ .^2, data=demog)
+X.lasso.train <- X.lasso[train.index,]
+X.lasso.test <-  X.lasso[test.index,]
+
+```
+
+## task 4a)
+Train the model using `cv.glmnet` and create for the test data the predictive probabilities and the Bayes classifier. Use the "one-standard-error" rule. Remember to set the correct family in `cv.glmnet` and set the 
+argument `standardize=T`. It is a good idea to do the crossvalidation using multiple cores, this since for this large data set the fitting can take quit some time. So additionally, set the argument `parallel=TRUE` to 
+allow for faster multicore computation via the `doParallel` library. 
+```{r }
+library(glmnet)
+library(doParallel)
+numcores = detectCores()
+doParallel::registerDoParallel(cores = numcores)
+
+glm.cv.obj.lasso <- cv.glmnet(x = X.lasso.train, y = y.train, alpha = 1, type.measure = "mse",intercept=FALSE, parallel = TRUE, standardize = TRUE)
+
+lasso.pred.prob <- predict(glm.cv.obj.lasso, newx= X.lasso.test, s = "lambda.1se" )
+lasso.pred.class <- lasso.pred.prob[lasso.pred.prob > 0.5]
+
+
+```
+
+
+
+
+## task 4b)
+Again we use the library `MLmetrics` and the function  `LogLoss` to get the cross entropy loss for the lasso model.
+How did it compare to the NN?
+```{r }
+library(MLmetrics)
+lasso.logloss <- LogLoss(y_pred = lasso.pred.prob,y_true = y.test)
+task4b.lasso.vs.NN <- "Lasso logloss was higher than the NN. Lasso had logloss of 0.61, whereas the best model of NN had a logloss of 0.32, so NN was a better model than the lasso"
+```

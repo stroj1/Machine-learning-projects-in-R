@@ -1,0 +1,79 @@
+---
+title: "Template"
+subtitle: "STAE04/DABN19: Data Visualization"
+author: "Your Name"
+date: "`r Sys.Date()`"
+papersize: a4
+geometry: margin=4cm
+colorlinks: true
+output:
+  pdf_document:
+    number_sections: true
+---
+
+```{r setup, include = FALSE}
+# Setup options for R Markdown
+knitr::opts_chunk$set(
+  echo       = FALSE,    # Do not print code
+  warning    = FALSE,    # Suppress warnings
+  message    = FALSE,    # Suppress messages
+  fig.align  = "center", # Center figures
+  fig.width  = 2.7,      # Good standard figure width for single-panel figures
+  fig.height = 2.4       # Good standard figure height for single-panel figures
+)
+
+library(tidyverse)
+
+# Set a theme for ggplot2
+theme_set(theme_grey(base_size = 10))
+
+# Set options
+options(
+  digits = 3, # limit the number of significant digits
+  width  = 63 # limit the width of code output
+)
+```
+
+# Introduction
+
+In Table 1, we outline the properties of some presidents from the USA.
+
+Table: Properties of some presidents in the US and their terms.
+
+Name                   Party         Start of term    End of term
+--------------------   -----------   --------------   --------------
+Dwight D. Eisenhower   Republican              1953             1961
+John F. Kennedy        Democratic              1961             1963
+Lyndon B. Johnson      Demoratic               1963             1969
+Richard Nixon          Republican              1969             1974
+
+We could also make a neatly formatted table directly from R, using
+`knitr::kable()`! Here we explicitly tell R Markdown to show our code
+in the output. See the result in Table 2.
+
+```{r table1, echo = TRUE}
+library(tidyverse)
+
+# Pull some data from the presidential data set
+presidential %>%
+  head(4) %>%
+  knitr::kable(
+    caption = "The terms of some presidents in the US.",
+    booktabs = TRUE # nicer PDF tables (always use this)
+  )
+```
+
+To wrap up our investigation of US presidents, let's create a plot outlining
+the terms of some of the presidents (Figure 1).
+
+```{r plot1, fig.cap = "The terms of some presidents in the US.", fig.width = 5}
+presidential %>%
+  head(9) %>%
+  mutate(order = 1:n(), name = reorder(name, order)) %>%
+  ggplot(aes(xmin = start, xmax = end, y = name, color = party)) +
+  geom_linerange() +
+  scale_color_manual(values = c("navy", "red")) +
+  labs(y = "President", x = "Time", color = NULL) +
+  theme_minimal(base_size = 10) +
+  theme(legend.pos = c(0.85, 0.25))
+```

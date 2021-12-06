@@ -1,0 +1,357 @@
+---
+title: "Assignment 2"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Preamble: Predicting purchases in online shops. 
+This assignment will be based on a dataset on online shopper purchase data which is available on the UC Irvine Machine Learning Library. A description of all variables is available [here  ](https://www.kaggle.com/henrysue/online-shoppers-intention). Among the 11 variables in the dataset, we will only use the three following:
+
+ - **Revenue**: (TRUE/FALSE) Whether a purchase was made by a visitor to the online shop
+ - **ProductRelated_Duration**: (numerical) Time spend on pages relevant/related to the product in question.
+ - **ExitRate**: (numerical) The percentage of visits to the online shop that end with visiting the site of the product at issue.
+
+## Part 0: Preparing the data
+
+Load the data into R and save it in an object called ´ shoppers´. The dataset is contained in a comma-separated spreadsheet. Accordingly, you will need to use the ´ read.csv()´ command in R.
+
+```{r, echo=TRUE}
+
+shoppers<-read.csv("online_shoppers_intention.csv")
+  
+```
+
+In the steps below, we will fit a quite small logistic regression model including the following variables in addition to the intercept:
+
+1. ` ExitRate ` without further transformation
+2. The (natural) logarithm of ` ProductRelated_Duration + 1 `
+3. The square of the variable in 2.
+
+The code below does all data transformations for you. However, please note the shortened variable names that we are going to use from now on.
+
+```{r, echo=TRUE}
+
+X <- as.matrix(cbind(1, shoppers$ExitRates, log(1 + shoppers$ProductRelated_Duration),(log(1 + shoppers$ProductRelated_Duration))^2 ))
+colnames(X) <- c("intercept", "ER", "lPR_Dur", "lPR_Dur2")
+y <- shoppers$Revenue
+
+
+```
+
+
+## Part 1: Logistic regression mechanics
+
+Before we fit a logistic regression using the convenient `glm()` command, we are going to estimate the slope coefficients in a logistic regression in a more rudimentary way. 
+One inconvenient of logistic regression is that there is no analytic formula for $\hat{\beta}$ into which we can simply plug our matrices ` X ` and ` y ` to get estimates for a specific dataset. Instead, we need to find parameter values that maximize the likelihood function.
+
+Recall that the log likelihood of a logistic regression model is given by
+$$
+lL(\beta)  = \sum_{i=1}^n y_i \log(p_1(x_i;\beta)) + (1-y_i) \log(1 - p_1(x_i;\beta)) 
+$$
+where 
+$$
+p_1(x_i;\beta) = \frac{1}{1+ \exp(-x_i\beta)}.
+$$
+
+### Task 1a) 
+Create a function ` p1 `  that takes `X` and `beta` as inputs and returns a vector of probabilities for category 1 where entry $i$ corresponds to $p_1(x_i;\beta)$.
+```{r , echo=T}
+
+p1 <- function(X, beta){
+
+
+    prob=1/(1+exp(-X%*%beta))
+    
+
+return(prob)
+}
+
+
+```
+
+### Task 1b)
+Next, write a function that evaluates the log-likelhood times minus one. Use the function ` p1 ` when doing this. It makes very much sense to save the output of ` p1 ` as a new object ` prob ` inside the function and to use `prob` when calculating the log-likelihood function.
+```{r , echo=T}
+
+
+negll<- function(beta, X, y){
+
+  
+ prob<-p1(X,beta)   
+ loglik<- sum(y*log(prob)+(1-y)*log(1-prob))
+     
+  
+return(-loglik)
+} 
+
+
+```
+
+### Task 1c)
+Use the code below to maximize the log likelihood function. Have a look at the help file for the `optimize` function and explain what the first two inputs of this function are conceptually.
+
+``` {r, echo=T}
+
+set.seed(1)
+betahat1c <- optim(c(0,0,0,0), negll, X=X,y=y)$par
+print(betahat1c)
+
+
+explain2inputs1c <- "The first input set the initial values for the parameters to be optimized, the second input is the function that will be maximized or minimized. If the function is negative, it will maximize. In our case, our function is the logistic regression, that we use with negative sign, wich means that optim() will maximize our logistic regression."
+
+
+
+```
+
+
+## Part 2: Logistic regression with ` glm() `
+
+The different tasks in Part 1 are automatically conducted by the ` glm() ` command which we will use in this part.
+
+### Task 2a)
+Combine the existing vector `y` as well as the variables `ER` and `lPR_Dur` (excluding its square) in a new data frame `minishoppers`. Ensure that the variable names in this new data frame are ` Revenue `, `ER` and `lPR_Dur`.
+
+Then use the ` glm() ` command to fit a logistic regression of `Revenue` on ` ER `, a second-order polynomial of ` lPR_Dur ` and a constant.To include the aforementioned second-order polynomial, use the ` poly() ` command in the formula-part of `glm()`.
+Save the vector of coefficient estimates in an object `betahat2a`.
+ 
+Note: If you want coefficients on the polynomial terms that are identical to those created in Part 0 you need to use `poly()` with option `raw=TRUE`. If you get results that identical to those from Task 1c up to the second nonzero digit then you have no reason to suspect that you made an error.
+
+``` {r, echo=T}
+
+
+minishoppers <- data.frame(Revenue=y,
+                           ER=X[,"ER"],
+                           lPR_Dur=X[,"lPR_Dur"])
+
+glm.fit2a    <- glm(Revenue~ER+poly(lPR_Dur,degree = 2,raw=TRUE),family=binomial,data=minishoppers)
+
+
+betahat2a    <- coef(glm.fit2a)
+print(betahat2a)
+
+
+
+```
+
+### Task 2b) 
+A fundamental principle of machine learning is that we divide the data available to us into different sets which we use for different steps of our modelling process. Use the ` dim() ` command to save the number of observations in ` minishoppers ` in an object called ` nobs `. Then, use the ` sample() ` command to randomly draw `nobs/2` numbers (without replacement) from the integers ` 1,2,...,nobs` and save this draw as an object `train`.
+Note: The command ` set.seed(1) ` specifies which sequence of (quasi-) random numbers we will draw and should ensure that you all arrive at the same training set.
+
+
+``` {r, echo=TRUE}
+
+
+set.seed(1)
+ nobs  <- dim(minishoppers)
+ train <- sample(1:nobs[1],size=(nobs[1]/2),replace=FALSE)
+
+
+```
+
+
+### Task 2c)
+The vector ` train` contains the index number of observations that we allocated to the training data.If we use it to specify the rows of ` minishoppers ` within the square brackets that we use for indexing, we are directly getting training data. Knowing this, please refit the model from Task 2a on your training set.
+
+``` {r, echo=TRUE}
+
+glm.fit2c <- glm(Revenue~ER+poly(lPR_Dur,degree=2,raw=TRUE),family=binomial,data=minishoppers[train,])
+
+```
+
+### Task 2d) 
+Now that we have fitted our model, we want to evaluate its predictive performance on test data. To do that, we first need to obtain predicted probabilities for purchases on the test data. Use the ` predict() ` command to obtain such predicted conditional probabilities from the model fit in Task 2c on the observations in our test set.
+Note: The test set consists of the observations that are not in our training set. Use this statement formally when setting the row indexes of ` minishoppers ` for the `newdata ` option of `predict()`.
+
+``` {r, echo=TRUE}
+
+glm.prob2d <- predict(glm.fit2c,newdata=minishoppers[-train,], type="response")
+
+
+```
+
+### Task 2d+)
+When predicting from an object created by `glm()`, we used the additional option `type="response"`. What does this lead to? Additionally, what is predicted if we do not explicitly write this option? Check the help file for `predict.glm` and express your answer using a concepts that we have used in the slides to Lecture 2.
+
+``` {r, echo=TRUE}
+
+
+predictglm_type2d = "Type response is an option that let us establish that we are working with a categorical variable, which in our case is the revenue variable with two possible values (true or false). this option gives us as an output the log-odds probabilities. If we dont use the type=response it will give us linear predictors as the output."
+
+
+
+
+```
+
+### Task 2e)
+In a next step, we apply a classifier to map our predicted probabilities into class predictions. We are going to approximate the Bayes classifier here. First, create a new vector ` glm.pred2e ` which has as many elements as ` glm.prob2d ` and which consists entirely of the logical statement `FALSE` (without citation marks!) 
+Second, replace the zeros in ` glm.pred2e ` with `TRUE` for all elements where the corresponding predicted probability exceeds the threshold used for the classifier mentioned above. The way in which we do this is to select elements of glm.pred2e by putting a true-or-false (or logical) statement into square brackets. The elements where the statement is true will be changed to 1.
+Please additionally write the true-or-false statement that you use into the string variable ` logical2e ` for the sake of making assignment evaluation simpler for us.
+ 
+
+``` {r echo=TRUE}
+
+  glm.pred2e<- vector(mode = "logical", length = length(glm.prob2d))
+
+  glm.pred2e[glm.prob2d>0.5] <- TRUE
+
+summary(glm.pred2e)
+
+  logical2e  <- "glm.pred2e[glm.prob2d > 0.5] <- TRUE"
+
+
+```
+
+
+### Task 2f)
+Choose an appropriate loss function and write its name in the string variable `chosenloss2f`. Then, use the objects created in the previous tasks of this part to obtain (overall) test error for the logistic regression model fitted in Task 2a.
+
+``` {r, echo=TRUE}
+
+chosenloss2f <- "Misclassification error"
+
+testerr2f    <- sum(minishoppers[-train,]$Revenue!=glm.pred2e)/length(minishoppers[-train,]$Revenue)
+
+
+```
+
+
+## Part 3: Class-specific prediction errors
+
+In classification problems, overall test error may not always be our primary concern. To get a more differentiated picture, confusion matrices and the ROC curve are useful tools. We will get both using the `ROCR` package which calculates a large number of performance criteria for binary classification
+
+``` {r, echo=FALSE}
+library(ROCR)
+```
+
+### Task 3a)
+
+The fundamental object of `ROCR` containing information about correct and incorrect classifications is the "prediction object". It is created using the `prediction()` command with two inputs:
+1. The predicted probabilities for class 1 on the test set.
+2. The test outcomes
+Create such a prediction object.
+
+``` {r, echo=FALSE}
+
+glm.rocrpred3a <- prediction(glm.prob2d,minishoppers[-train,]$Revenue)
+
+```
+
+
+### Task 3b)
+ROCR's prediction object contains counts of correct and incorrect predictions for all possible classifier thresholds ("cutoffs"). We can see that by printing the names of elements within that object:
+
+``` {r, echo=TRUE}
+
+slotNames(glm.rocrpred3a)
+
+```
+
+### Task 3c)
+
+Now use save the output of `performancemetrics` with the prediction object of task 3a and the threshold probability of the Bayes classifier as input. Additionally, answer two questions:
+
+1. Are you satisfied with the overall accuracy with which our model predicts purchases?
+2. Is the accuracy with which observed purchases are correctly predicted satisfactory? Assume here that we have considerable interest in predicting actual purchases correctly.
+
+``` {r, echo=TRUE}
+
+metrics3c <- performancemetrics(glm.rocrpred3a,0.5)
+
+overall_acc_verdict3c      <- "the error rate is telling us the proportion of cases where the prediction is wrong, in our case is 15% of the cases. For the purchase business 15% is not a bad error rate, but it doesnt tell us if we are going to  However, overall error is not the most accurate way to conclude about the category-specific errors. It would be better to use other measures too"
+obs_purchase_acc_verdict3c <- "Is not. The true possitive rate is very low, which means that our chance of predicting purchases correctly is very low. Also, looking at the confusion matrix we see that we have 5.225 False falses and 932 true falses, so our model is not very accurate for predicting purchases because apparently we can predict better the Falses (so no purchase)"
+
+``` 
+
+### Task 3d)
+
+Assume we would like to get a classifier that has relatively balanced class-specific performance. In other words, we want to choose a threshold such that TPR is approximately 1-FPR. In order to see that trade-offs that are available to us, we will look at a ROC curve.
+In order to plot a ROC curve, we first need to create a ROCR performance object containing the TPR and FPR. Do this by using the `performance()` object with the following inputs
+
+1. The ROCR prediction object to be evaluated
+2. The first performance measure (see R help)
+3. The second performance measure (see R help)
+
+Next, plot the resulting ROCR performance object. This will give you a (nicely colored) ROC curve. Answer the following questions:
+
+1. Where in the plot do you see the combination of TPR and FPR obtained in Task 3b?
+2. Which threshold should we choose to get the balanced class-specific performance described above. You may eyeball an approximate value from the ROC curve and use the `confumat()` function to arrive at a more refined choice. Two decimals are enough (e.g. 0.54).
+
+``` {r, echo=TRUE}
+
+ ROCdata3d         <- performance(glm.rocrpred3a,"tpr","fpr")
+ plot(ROCdata3d,colorize=TRUE)
+ 
+ 
+ print(performancemetrics(glm.rocrpred3a,0.185))
+ 
+ whereis_3bcombo3d <- "In the orange point that corresponds to the threshold 0.5 in the coordinates (0.0009,0.0032)"
+ 
+ optimal_cutoff3d  <- "The requested threshold is there TPR=1-FPR which is the same as TPR+FPR=1. Using the performance matrix function, iterating for different values for the threshold I found that with a threshold of 0.185 we get TPR=0.65 and FPR=0.34 which is a ggod approximation for the resquested threshold"
+
+```
+
+### Task 3e)
+To what extend does our chosen threshold from Task 3d compromise overall accuracy? The ROCR package allows us to generate graphics which may help to find an answer. To arrive there, first create a new ROCR performance measure from the ROCR prediction object of Task 3a whose only measure is accuracy. 
+Then, plot this new object.
+
+``` {r, echo=TRUE}
+
+ accdata3e <- performance(glm.rocrpred3a,"acc")
+
+ plot(accdata3e)
+ is_accuracy_compromised3e <- "yes, the accuracy is compromised because we lost around 0.2 points of acuracy by changing the threshold from 0.5 to 0.185"
+
+```
+
+## Part 4: Interpretation
+
+Let's round of this assignment with two nontechnical tasks. Consider the plot below which contains the test data together with a decision boundary resulting from the classifier chosen in Task 3c.
+
+```{r, echo=FALSE}
+
+
+library(ggplot2)
+ 
+ attach(minishoppers[-train,])
+ ER_seq      <- seq(min(ER), max(ER) ,length.out = 100)
+ lPR_Dur_seq <- seq(min(lPR_Dur), max(lPR_Dur) ,length.out = 100)
+ detach(minishoppers[-train,])
+ 
+ grid.X    <- expand.grid(ER=ER_seq, lPR_Dur=lPR_Dur_seq)
+ grid.prob <- predict(glm.fit2c, newdata=grid.X, type="response")
+ grid.data <- data.frame(grid.prob, grid.X)
+ 
+ g <- ggplot() +
+   geom_tile(data = grid.data, aes(y = ER,x=lPR_Dur, fill= (grid.prob>0.18)), alpha = 0.3, show.legend = T) +
+   ggtitle('Decision Boundary') +
+   theme_bw(base_size = 12) +
+    geom_point(data=minishoppers[-train,], aes(y=ER, x=lPR_Dur, color=Revenue))
+ print(g)
+
+
+```
+
+### Task 4a)
+Summarize for which values of Exit Rates and logarithmic Duration on Product-related sites our predictive model predicts a purchase. Keep limit your description of values to very general categories like "large", "small" or "close to zero".
+
+``` {r, echo=TRUE}
+
+
+summarizeplot4a <-"The graph show us the predicted purchases in the green shaded area, and purchases as green dots, non purchases as red dots. Our model predicts a purchase better for values of IPR_Dur lower than 3 and greater than 9. That is because for values between 3 and 9 we observe a high concentration of not purchases (red dots). For ER our model predicts better a purchase when ER is lower than 0.05. So, our model predicts better when the client spends more time in product related sites and with a very low exit rate"
+
+```
+
+### Task 4b)
+Both the lecture slides and our cours book postulate that the decision boundaries of logistic regression are LINEAR in the predictors. However, in the plot above, we can clearly see a CURVE. What the hell is going on? Please explain.
+
+``` {r, echo=TRUE}
+
+ explaindecboundary4b <- "We learned Logistic regression has decision boundaries linear in X, but decision boundaries are not restrictive. We see a curve in the plot because of the polynomial on the formula. Polynomials let us have decision boundaries not linear in X"
+
+```

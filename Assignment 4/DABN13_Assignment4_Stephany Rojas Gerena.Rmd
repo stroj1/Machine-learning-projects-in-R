@@ -1,0 +1,435 @@
+---
+title: "DABN13 - Assignment 4"
+date: '2021-09-27'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Preamble: Forecasting market returns
+We continue with the problem of forecasting market return that we illustrated in Lecture 6. In order to train the implementation of PCR/PLS, we will replicate our previous results with a slight twist. More specifically, we will choose tuning parameters via cross-validation. Additionally, the training sets used for model evaluation are defined differently. While the example in Lecture 6 defined an expanding window of training sets with fixed starting period, we are going to use a rolling window that moved both the start and end date of the training set.
+
+The data for this lab is provided by two csv files. 
+The file *sorted_portfolios100.csv* contains the monthly returns of 100 equally weighted portfolios sorted by size and the book-to-market ratio. The data is taken from Kenneth French's data library and missing values have been inserted. The time period covered is January 1960 until December 2009
+The file *twelve_month_returns.csv* contains 12-month returns on a value-weighted market portfolio. This series takes moving 12-month sums of returns of the U.S. market factor, as provided on Kenneth French's data library. The entry in row $t$ of the dataset corresponds to the market returns over the months t+1 until t+12. Accordingly, the first observed value in our sample is the 12-month return over the period February 1960 - January 1961. The last observation covers the period January-December 2010.
+
+To begin with the lab, please import both your outcome as well as the 100 predictors into R using the code below. You might be required to modify the file path.
+``` {r }
+portfolios <- as.matrix(read.csv("sorted_portfolios100.csv")[,-1])
+mkt.ret.12m <- as.matrix(read.csv("twelve_month_returns.csv")[,-1])
+
+
+```
+
+## Part 1: PCR mechanics
+
+We stated in Lecture 6 that PCR consists of two ridiculously simple steps: 1. Obtain $M$ principal components $Z_1,Z_2,\ldots,Z_M$ from the set of predictors $X$, 2. Regress the outcome $Y$ on $Z_1,Z_2,\ldots,Z_M$. In this part, we are going to convince us that this is exactly what the standard canned routine for PCR in R does. 
+
+### Task 1a)
+
+By convention, Principal components are obtained from standardized data. Accordingly, use the `preProcess` command from the `caret` package to obtain the means and standard deviations of all 100 sorted portfolios. Once you have done that, generate a **matrix** `X.1a` which contains 100 standardized predictors which have a mean of zero and a variance of one. Additionally, save the 12-month market returns in a vector `y.1a`.
+``` {r, echo=FALSE, message=FALSE}
+library(caret)
+```
+
+
+``` {r }
+
+ scaling.X.1a <- preProcess(portfolios,method = c("center", "scale"))
+ X.1a         <- predict(scaling.X.1a,portfolios)
+ y.1a         <- mkt.ret.12m
+
+```
+
+### Task 1b)
+
+We can now use the singular value decomposition (SVD) to obtain principal components (PCs). In this part, the number of PCs that we obtain is exogenously given as $M=2$. The `svd()` command in R allows us to obtain a list object containing the left and right singular vectors as well as a vector containing the singular values of any matrix that we feed into `svd()`. Get the left and right singular vectors corresponding to the two largest singular values of `X.1a` and save the list object created by `svd()` as `X.svd.1b`.
+Then, construct the scores of the first two PCs of `X.1a` using the expressions on slide 14 (sometimes labeled as 16) of the handout to Lecture 6.
+
+``` {r }
+
+
+X.svd.1b  <- svd(X.1a,nu=2,nv=2)
+PCscores.1b  <- cbind(X.svd.1b$u[,1]*X.svd.1b$d[1],X.svd.1b$u[,2]*X.svd.1b$d[2])
+
+
+
+```
+
+### Task 1c)
+
+The lecture slides mentioned above provide you with two difference expressions of the m-th principal component scores. Use the expression not used in task 1b) to obtain the scores of the first two PCs of `X.1a`. Then take the difference between the PC scores obtained in this task and the last, take the square of every difference and sum over both observations and both PCs. The resulting number should be practically zero.
+
+
+``` {r }
+ PCscores.1c    <- X.1a%*%X.svd.1b$v
+ diff.twoZs.1c  <- sum((PCscores.1b-PCscores.1c)^2) 
+
+```
+
+### Task 1d)
+
+Proceed now with the second step of PCR. To do this get the least squares estimates of the slope coefficients in a regression of the outcome on your two PCs and a constant. Do this manually using only the `solve()` and `t()` commands as well as matrix operations.
+Then, obtain predictions for every observed outcome in the data.
+
+``` {r }
+
+ Z.matrix.1d    <- cbind(1,PCscores.1c)
+ pcr.coefs.1d   <- solve(t(Z.matrix.1d)%*%Z.matrix.1d)%*%t(Z.matrix.1d)%*%y.1a
+ pcr.pred.1d    <- Z.matrix.1d%*%pcr.coefs.1d 
+
+```
+
+### Task 1e)
+
+Now we can use the `pcr()` command to get equivalent predictions to those in task 1d. Please conduct the following steps:
+
+1. Create a data frame `data.1e` containing both the 12-month market returns as well as the monthly returns of the 100 sorted portfolios. 
+2. Use the `pcr()` command to fit a PC regression on 12-month market returns using two principal components obtained from all 100 monthly portfolio returns. Specify suitable options for `pcr()` that ensure the predictors are both demeaned and scaled. 
+3. Obtain predictions from your model. 
+4. Take the difference between the predictions obtained in this and the previous step, take the square of all differences and add them together. The resulting number should be practically zero.
+
+*Note*: When predicting outcomes from a trained PC regression, you should explictly specify the number of principal components that should be used for predictions. The `ncomp` option allows you to do that.
+``` {r, echo=FALSE, message=FALSE }
+
+library(pls)
+
+```
+
+
+``` {r }
+
+ data.1e        <- data.frame(mkt.ret.12m,portfolios)
+ pcr.fit.1e     <- pcr(mkt.ret.12m~.,data=data.1e,ncomp=2,scale=TRUE,center=TRUE)
+ pcr.pred.1e    <- as.vector(predict(pcr.fit.1e,ncomp=2))
+ diff.pred.1e   <- sum((pcr.pred.1e-pcr.pred.1d)^2)
+
+```
+
+
+
+
+
+## Part 2: Write a function for time series cross-validation
+
+Recall that we are currently working with time series data. Thus, the standard version of cross-validation (CV) is not a suitable tool to decide on the number of principal components to take in PCR. 
+
+Unfortunately, support for time series CV in R is quite poor. For this reason, we need to write a DIY CV routine for time series data. In the following, we will set up a sequence of steps that we eventually collect in an R function.
+
+### Task 2a)
+
+*Preliminarily*, I assume that the PC component regression whose tuning parameter is chosen is fit on the entire observed time series length. Accordingly, I need to define training and holdout folds in terms of `n.obs.2a`, the total number of observations. Determine the exact value of `n.obs.2a`.
+
+The training sets that I construct below are rolling 120-day windows, That is, I perform an equivalent of LOOCV for time series where both the end *and* the start of the training fold are shifted by one time period at each iteration. The way in which I determine training folds as object `train.2a` below is to state the observation index of their start (column 1) and their end (column 2) in every iteration $j$ (row $j$).
+
+My intention is to have test folds that only consists of the time period directly after the end of the corresponding training fold. Please create a vector `holdout.2a` that defines the start and end of all holdout folds for our CV algorithm, in the same way in which I defined `train.2a`. That means, `holdout.2a` should have the same dimensions as `train.2a`, specifying the start and end dates of the holdout fold for the j-th iteration of CV in row $j$.
+
+``` {r }
+
+ n.obs.2a  <- dim(portfolios)[1]
+ n.rwin.2a <- 120
+ train.2a  <- cbind(1:(n.obs.2a-n.rwin.2a),n.rwin.2a:(n.obs.2a-1))
+ holdout.2a <- cbind(n.rwin.2a:(n.obs.2a-1)+1,n.rwin.2a:(n.obs.2a-1)+1)
+
+```
+
+### Task 2b)
+
+We will eventually write a loop that goes through the individual rows of `train.2a` and `holdout.2a`. For now, I *preliminarily* set $j=1$. 
+
+Our next task is to extract the specific training and holdout fold for the $j$-th iteration of the CV algorithm. First, collect your predictors and the your outcome in a data frame `data.2b`, precisely as in task 1e. However, now allocate the generic name `y` to the column containing the outcome. Then, create two objects `data.train.2b` and `data.holdout.2b` that contain these folds. Use the objects created in the last task above for indexing and refer generally to their $j$-th row.   
+ 
+``` {r }
+ j <- 1
+ data.2b         <- data.frame(y=mkt.ret.12m,portfolios)
+ data.train.2b   <- data.2b[train.2a[j,1]:train.2a[j,2],]
+ data.holdout.2b <- data.2b[holdout.2a[j,1]:holdout.2a[j,2],]
+
+```
+
+### Task 2c)
+
+I *preliminarily* determined the upper bound for the possible number of PCs to $M_{max}=5$. Now we want to get holdout fold predictions for all PCRs with up to $M_{max}$ PCs. Do the following to get them:
+
+1. Fit a PCR with $Mmax$ PCs on the training fold. Use appropriate options of `pcr()` to ensure that the command automatically centers and scales your predictors.
+2. Obtain model predictions on the holdout fold for PCRs with $1,2,\ldots,M_{max}$ PCs. The `predict()` command allows you to to that with the single PCR that you trained if you simply specify the `ncomp` option in `predict()` correctly.
+
+
+
+``` {r }
+
+ Mmax <- 5
+ pcr.fit.2c <- pcr(y~.,ncomp=Mmax,data=data.train.2b,center=TRUE,scale=TRUE)
+ pcr.pred.2c <- predict(pcr.fit.2c, newdata = data.holdout.2b)
+
+```
+
+### Task 2d)
+
+Predicted values for PCRs with between $1$ and $M_{max}$ PCs allow us to obtain a measure of prediction accuracy on the test data. To arrive there, do the following:
+
+1. Create a scalar object `num.itr` whose content is the number of rows in `train.2a`.
+2. Create a `num.itr` times `Mmax` matrix `CVloss.all.2d` which consists of missing values.
+3. Write a loop that runs through the values of $m=1,2,\ldots,M_{max}$ and stores the squared loss on the holdout fold of a PCR with $m$ PCs in element [`j`,`m`] of `CVloss.all.2d`. Note that `pcr.pred.2c` is a three-dimensional array, containing the predictions for a PCR with `m` PCs in index `m` of the third dimension.
+
+``` {r }
+
+ num.itr       <- dim(train.2a)[1]
+ CVloss.all.2d <- matrix(data=NA,nrow=num.itr,ncol = Mmax)
+
+   
+   for(m in 1:Mmax){
+     
+     CVloss.all.2d[j,m]=sum((pcr.pred.2c[,,m]-data.holdout.2b$y[j])^2)
+     
+   }
+   
+ 
+
+```
+
+### Task 2e)
+
+Lastly, assuming that all `num.itr` rows of `CVloss.all` were filled instead of simply the very first such row, create a vector `CVloss.mean.2e` that takes averages of the elements in every column of `CVloss.all`. Use the `apply()` command to do this. To simplfy assignment correction to us, please copy and paste the specific command that you use into the string variable ` my.apply.command.2e`.
+
+``` {r }
+
+ CVloss.mean.2e  <- apply(X=CVloss.all.2d,MARGIN=2,FUN=mean)
+ my.apply.command.2e <- "apply(X=CVloss.all.2d,MARGIN=2,FUN=mean)"
+
+```
+
+### Task 2f)
+
+We have now gone through almost all steps of the CV algorithm that we are supposed to create. Only two issues remain:
+
+1. Running through all `num.itr` combinations of training and holdout folds.
+2. Writing a function for the entire procedure
+
+We are going to do both at once. Below, I prepared the fragment of a function `cv.pcr()` that is supposed to conduct the entire CV algorithm. Complete the function by using code from steps 2a-e. Note the following:
+
+1. The function inputs are a) a matrix "X" containing predictors, b) a vector "y" containing the outcome, c) the maximum number of PC to consider, d) a matrix indicating the start and end of all training folds, e) a matrix indicating the start and end of all holdout folds.
+2. The function returns a $M_{max} \times 2$ matrix `CVres` which contains specifies the number of PCs used and the corresponding average loss on the holdout folds.
+3. The objects `num.itr` and `CVloss.all` need to be created before you loop through $j$.
+4. Specific values for `j` and `Mmax` must not be set separately. 
+
+
+``` {r }
+
+ cv.pcr <- function(X,y, Mmax, train, holdout) {
+  
+   num.itr    <- dim(train)[1]
+  
+   CVloss.all <- matrix(data=NA,nrow=num.itr,ncol = Mmax)
+   
+   
+   data <- data.frame(y=y,X)
+   data.train   <- data[train[num.itr,1]:train[num.itr,2],]
+   
+     
+   for (j in 1:num.itr) {
+     
+     data.train   <- data[train[j,1]:train[j,2],]
+     data.holdout <- data[holdout[j,1]:holdout[j,2],]
+   
+   
+     pcr.fit <- pcr(y~.,ncomp=Mmax,data=data.train,center=TRUE,scale=TRUE)
+     pcr.pred <- predict(pcr.fit, newdata = data.holdout)
+     
+        for(m in 1:Mmax){
+        
+        CVloss.all[j,m]=sum((pcr.pred[,,m]-data.holdout$y[1])^2)
+        
+        }
+     
+     m<-1
+     
+     
+   }
+ 
+   CVloss.mean <- apply(X=CVloss.all,MARGIN=2,FUN=mean)
+   
+   
+   CVres  <- cbind(1:Mmax, CVloss.mean)
+   return(CVres)
+ }
+
+
+
+
+```
+ 
+
+### Task 2g)
+
+Write a function that does cross-validation for the number of PLS directions in PLS. This function is effectively identical to `cv.pcr()` but uses the `plsr()` command to fit PLS.
+ 
+``` {r }
+
+ cv.plsr <- function(X,y, Mmax, train, holdout) {
+   
+   num.itr    <- dim(train)[1]
+   CVloss.all <- matrix(data=NA,nrow=num.itr,ncol = Mmax)
+   
+   
+   data <- data.frame(y=y,X)
+   data.train   <- data[train[num.itr,1]:train[num.itr,2],]
+   
+   
+     
+   for (j in 1:num.itr) {
+     
+     data.train   <- data[train[j,1]:train[j,2],]
+     data.holdout <- data[holdout[j,1]:holdout[j,2],]
+   
+   
+     pls.fit <- plsr(y~.,ncomp=Mmax,data=data.train,center=TRUE,scale=TRUE)
+     pls.pred <- predict(pls.fit, newdata = data.holdout)
+     
+        for(m in 1:Mmax){
+        
+        CVloss.all[j,m]=sum((pls.pred[,,m]-data.holdout$y[1])^2)
+        
+        }
+     
+     m<-1
+      
+      
+       
+   }
+ 
+   CVloss.mean <- apply(X=CVloss.all,MARGIN=2,FUN=mean)
+   
+   CVres          <- cbind(1:Mmax, CVloss.mean)
+   return(CVres)
+ }
+
+```
+
+
+
+### Task 2h)
+
+Now, apply your two functions `cv.pcr()` and `cv.plsr()` to find out which tuning parameter cross-validation would suggest for the collection of training and holdout folds defined in task 2a. The outcome and the predictors are as before. The splits into training and test folds are those from task 2b. Consider a maximum number of 15 PCs/PLS directions. 
+Which numbers are chosen?
+
+``` {r }
+
+ pcr.cv.2h <- cv.pcr(X.1a,y.1a,15,train.2a,holdout.2a)
+ pls.cv.2h <- cv.plsr(X.1a,y.1a,15,train.2a,holdout.2a)
+ 
+ which.min(pcr.cv.2h[,2])
+ which.min(pls.cv.2h[,2])
+ 
+ 
+ which.nums.chosen.2h <-"15,5"
+
+```
+
+
+## Part 3: A horse-race between PCR and PLS.
+
+Having a function that implements Cv is an immensely helpful tool for predictive analysis in practice, but it only addresses an intermediate step of data analysis. In the end, prediction problems are about predictions and their accuracy on previously unseen data. Therefore, we will finish this lab by investigating the relative out-of-sample forecasting performance of PCR and PLS.
+
+### Task 3a)
+
+First, define your training and test sets. The first 450 observations in the data are not to be used as test data. From observation 451 onward, the test error for observation $t$ is evaluated using a model fit on the 450 previous time periods. 
+Use your code from Task 2a) to create two matrices `train.3a` and `test.3a` which indicate the start and end of training sets and test sets, respectively.
+
+``` {r }
+
+ n.obs.3a  <- dim(portfolios)[1]
+ n.init.3a <- 450
+ train.3a  <- cbind(1:(n.obs.3a-n.init.3a),n.init.3a:(n.obs.2a-1))
+ test.3a   <- cbind(n.init.3a:(n.obs.3a-1)+1,n.init.3a:(n.obs.2a-1)+1)
+   
+
+```
+
+### Task 3b)
+
+As already seen in part 2, the split between training and holdout/test data in forecasting problems is not the same for all test data observations. Instead, we define the training data for each observation in the holdout/test set as the information up to the respective test observation. Why is this more sensible to do rather than fitting a model on a fixed number of training observations and using this model to predict all observations in the holdout/test set. 
+
+*Note*: Let me a bit more precise about this question: When doing predictions for a test observation at time $t$, we are always allowed to plug observed values for time period $t-1$ into the fitted model. But why does it make sense to *fit* the model itself on data up to $t-1$ rather than some previous period $T_0$ that holds for all $t>T_0$?
+
+``` {r }
+
+ why.expand.train.set3b = "Because the finantial market is very volatile so is better to use the most recent data available for our training data"
+
+```
+
+### Task 3c)
+
+Create two vector of missing values which have as many rows as you have test points. These are to be filled with PCR and PLS predictions of 12m-month market returns on the test set.
+
+``` {r }
+
+ pcr.pred.3c <- matrix(data=NA,nrow=dim(test.3a)[1],ncol = dim(mkt.ret.12m)[2])
+ pls.pred.3c <- matrix(data=NA,nrow=dim(test.3a)[1],ncol = dim(mkt.ret.12m)[2])
+
+```
+
+### Task 3d) 
+
+Below, I started writing a loop that obtains outcome predictions for every test data point. Please complete it by doing the following:
+
+1. Apply your DIY functions for cross-validation to the current training data, using the splits into training and holdout folds that are already provided in the loop. Consider at most $M_{max}=15$ PCs/PLS directions.
+2. Choose the optimal tuning parameter from the resulting matrices `pcr.cv.3d` and `pls.cv.3d`, respectively. The `which.min()` function allows you to do that very conveniently.
+3. Train PCR and PLS on the training data `data.3a.train` using your chosen value of the tuning parameter `pcr.mhat` or `pls.mhat`. Ensure that covariates are appropriately standardized.
+4. Obtain predicted outcomes for both PCR and PLS on the test set.
+
+``` {r }
+
+
+ for (itr in 1:dim(train.3a)[1]) {
+   
+   ### DON'T CHANGE STUFF HERE ###
+   # Split into training and test data
+   data.3a.train <- data.2b[train.3a[itr,1]:train.3a[itr,2],]
+   data.3a.test  <- data.2b[test.3a[itr,1]:test.3a[itr,2],]
+ 
+   # Define cross-validation samples
+   n.obs.cv      <- dim(data.3a.train)[1]
+   t.init.cv     <- 90
+   train.cv      <- cbind(1:(n.obs.cv-t.init.cv), t.init.cv:(n.obs.cv-1))
+   holdout.cv    <- cbind((t.init.cv+1):n.obs.cv, (t.init.cv+1):n.obs.cv)
+   
+   ### COMPLETE STUFF BELOW ###
+   # Find tuning parameter value via CV
+   pcr.cv.3d  <- cv.pcr(portfolios,y.1a,15,train.cv,holdout.cv)
+   pcr.mhat   <- which.min(pcr.cv.3d[,2])
+   pls.cv.3d  <- cv.plsr(portfolios,y.1a,15,train.cv,holdout.cv)
+   pls.mhat   <- which.min(pls.cv.3d[,2])
+ 
+   # Fit tuned model and get predictions
+   pcr.fit.3d          <- pcr(y~.,data=data.3a.train,center=TRUE,scale=TRUE,ncomp=pcr.mhat)
+   pcr.pred.3c[itr]    <- predict(pcr.fit.3d,newdata =data.3a.test,ncomp=pcr.mhat)
+ 
+   pls.fit.3d          <- plsr(y~.,data=data.3a.train,center=TRUE,scale=TRUE,ncomp=pls.mhat)
+   pls.pred.3c[itr]    <- predict(pls.fit.3d,newdata =data.3a.test,ncomp=pls.mhat)
+ 
+ }
+
+
+```
+
+### Task 3e)
+
+Given predictions on the test data, calculate the out-of-sample $R^2$ for both PCR and PLS over all test data points. Which method would you prefer for forecasting twelve-month market returns in the future?
+
+``` {r }
+
+ y.test.3e <- data.2b$y[451:600]
+ TSS       <- sum((y.test.3e-mean(y.test.3e))^2)
+ pcr.R2    <- 1-sum((y.test.3e-pcr.pred.3c)^2)/TSS
+ pls.R2    <- 1-sum((y.test.3e-pls.pred.3c)^2)/TSS
+ my.pref.methd.3e <- "I would prefer pls method because it has the highest R2 which means it fit our model better"
+
+```
+
+  

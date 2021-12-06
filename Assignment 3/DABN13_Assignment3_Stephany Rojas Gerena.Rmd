@@ -1,0 +1,283 @@
+---
+title: "Assignment 3"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Preamble: Prostate specific antigen
+Prostate specific antigen (PSA) might be know to you in the context of PSA tests, a widely used albeit somewhat controversial method to detect prostate cancer in middle-aged men. The dataset we are using in this lab contains measures of PSA levels in men shortly before they received prostate cancer treatment in the form of a surgical removal of their prostate. Additional variables are measures associated with the existing prostate cancer (log cancer volume Gleason score, percent of Gleason scores 4 or 5, seminal vesicle invasion, capsular penetration) as well as cancer-unrelated variables that are suspected to affect PSA levels (age, amount of benign prostatic hyperplasia, log prostate weight). 
+
+## Part one: Mechanics
+In this initial part, we are going to manually conduct the grid search over tuning parameter values that glmnet automatically provides us with when we fit the lasso or ridge regression. We are going to find the optimal tuning parameter for ridge regression since this allows us even to program the ridge regression estimator manually.
+The goal with this part is that you by building the functions on your own will gain a greater understanding in what is presented in the lectures, and hopefully a deeper understanding.
+
+Before conducting the first task, let us load some data.
+```{r }
+library(dplyr)
+prostate <- read.table('https://web.stanford.edu/~hastie/ElemStatLearn/datasets/prostate.data')
+train_index  = prostate$train==T
+prostate <- prostate %>% dplyr::select(-train)
+prostate.train <- prostate[train_index,]
+```
+
+### Task 1a)
+First we are going to demean all variables. In addition to that, we also want to standardize the sample variance of all predictors to one. 
+We will use `preProcess()` function in the `caret` library. The reason is that we want to store the parameter used for scaling. Use the `scaled.param` to scale (demean and standardize) the training data.  Read `help(preProcess)` on how to demean and scale the data.
+```{r }
+
+library(caret)
+scaled.param <- preProcess(prostate.train, method = c("center", "scale"))
+prostate.train <- predict(scaled.param,prostate.train)
+  
+
+```
+### Task 1b)
+Since we are estimating ridge regression manually in this part, we need to make sure that the features of our dataset are transformed into numerical variables. Use the `model.matrix()` command to create such a matrix,`X`, of *all* predictors. Here, the intercept should not be included in the `X`  since the data is demeaned (centered). the data in the next step. Use a suitable specification for this purpose when expressing the formula in `model.matrix()'
+Additionally, extract our outcome of interest from the data into a vector `y`.
+```{r}
+
+X <- model.matrix(lpsa~.-1,data=prostate.train) 
+y <- prostate.train$lpsa
+
+
+```
+### Task 1c)
+Demeaning all variables (`X` and `y`) has the convenient consequence that we do not need to include an intercept into our model. This is also very desirable in our manual implementation of ridge regression since we do not want to regularize the intercept. But WHY is it nonsensical to regularize the intercept? Please explain!
+Additionally, please explain why it is most often a good idea to standardize the variance of all predictors to one.
+``` {r}
+intercept_regul1c <- "including the intercept would make the procedure depend on the origin chosen for Y, that is, adding a constant would not result in a shift of the predictors by the same amount"
+standardize_varc <- "the shrinking wouldnt be fair. That is because using variables with different scales will have different contributions to the penalized terms, because the penalization term is a sum of squares of all coefficients. To avoid that problem, we standarize the variance of all predictors"
+```
+### Task 1d)
+Now we are in the position to write a function that estimates the ridge regression coefficient estimates for us. Write such a function `beta.ridge` using matrix operations in R. The function inputs should have predictors `X`, outcome `y` and the value of the tuning parameter `lambda` as inputs. 
+```{r}
+
+
+beta.ridge <- function(X, y,lambda){
+ 
+  lambdaI<-diag(lambda,dim(X)[2])
+  
+  beta<-solve((t(X)%*%X)+lambdaI)%*%(t(X)%*%y)
+  
+  return(beta)
+}
+
+```
+### Task 1e)
+In order to measure model generality, we also want to obtain the degrees of freedom of a particular ridge regression with shrinkage parameter $\lambda$. 
+Write the function `dfs.ridge` using `X` and `lambda.seq` that derives these degrees of freedom for the ridge problem for a sequence of $\lambda$'s.
+```{r }
+
+  dfs.ridge <- function(X, lambda.seq){
+  n.lambda <- length(lambda.seq)
+  dfs <- rep(0, n.lambda)
+  
+  
+  for(i in 1:n.lambda){
+   
+    dfs[i]<-sum(diag(X%*%solve((t(X)%*%X)+lambda.seq[i]*diag(dim(X)[2]))%*%t(X)))
+    
+  }
+  
+  return(dfs)
+}
+
+
+
+```
+### Task 1f)
+What does regularization, expressed by the value of the tuning parameter $\lambda$ to the estimated coefficients of ridge regression. The functions above allow you to investigate this question and to answer the following questions:
+
+1. What is the relation between $RSS$ and $\lambda$ and why is it that way?
+2. Howw does that show that we can't use the training error for selecting the hyperparameters?
+
+``` {r }
+lambda.grid <- 10^(seq(0,3, length=100))
+all.beta <- matrix(NA, nrow=dim(X)[2], ncol=length(lambda.grid))
+all.dfs  <- dfs.ridge(X, lambda.grid)
+all.RSS  <- all.dfs
+for (i in 1:length(lambda.grid)) {
+  all.beta[,i] = beta.ridge(X, y, lambda.grid[i])
+  all.RSS[i] = mean((y-X%*%all.beta[,i])^2)
+}
+library(ggplot2)
+library(reshape2)
+fig1 <- ggplot(data.frame(lambda = lambda.grid,
+                  dfs = all.dfs),aes(x=lambda, y=dfs)) + 
+  geom_line() +
+  scale_x_log10()
+print(fig1)
+fig2 <- ggplot(data.frame(lambda = lambda.grid,
+                  RSS = all.RSS),aes(x=lambda, y=RSS)) + 
+  geom_line() +
+  scale_x_log10()
+print(fig2)
+rownames(all.beta) <-colnames(X)
+colnames(all.beta) <- lambda.grid
+all.beta.long = melt(all.beta, id = variable)
+names(all.beta.long) <- c("Variable", "lambda", "Coefficient_value")
+fig3 <- ggplot(all.beta.long, aes(x=lambda)) + 
+  geom_line(aes(y=Coefficient_value, color=Variable)) + 
+  scale_x_log10()
+ex1f_relation_between_RSS_lambda <-"In the graph we can see that lamda has a inverse relation with degress of freedom and direct relation with RSS. The idea of ridge regression is to shrink the regression coefficients by imposing a penaly with the goal of minimizing the residual sum of squares. As lamda increases, the shrinkage penalty increases and the coefficients will tend to be shrunk toward zero, so the RSS will increase.
+We can't use the training error for selecting hyperparameters because the prediction error is a function of lambda, so we have a hyperparameter to tune"
+```
+### Task 1g)
+Below we plot what is known as the ridge path. Explain what the figure displays.
+```{r }
+rownames(all.beta) <-colnames(X)
+colnames(all.beta) <- lambda.grid
+all.beta.long = melt(all.beta, id = variable)
+names(all.beta.long) <- c("Variable", "lambda", "Coefficient_value")
+fig <- ggplot(all.beta.long, aes(x=lambda)) + 
+  geom_line(aes(y=Coefficient_value, color=Variable)) + 
+  scale_x_log10()
+print(fig)
+ex1g_fig_what_do_I_see <- "In the graph we see the values of the coefficients (betas) given different values of lambda. We see that as lambda increases, all the coefficients tend to zero because the shrinkage penalty increase. Having lambda=0 would be the regular OLS regression"
+
+
+
+```
+
+### Task 1h)
+
+We have discussed quite extensively that increasing the value of the shrinkage parameter $\lambda$ will draw the vector of estimated slope coefficients further to zero. However, when I have a look at the ridge path in Task 1g, I see at least one slope coefficient whose values temporarily *increases* as we increase $\lambda$. How is this possible?
+
+``` {r }
+
+explain_ridge_path_mystery1h <- "The path of some betas can be different. Our penalization term includes the sum of squares of the betas. Since the betas are codependent, they leave each other out, so we can have some betas increasing and some others decreasing, and when computing the sum of squares of the betas, it will tend to zero"
+
+```
+
+
+### Task 1i)
+So far we have only looked at the training error (RSS). However, using this measure to choose our tuning parameter value will surely lead to overfitting.  As a remedy, we will add the optimism of training error, $\omega$, in order to arrive at an estimate of in-sample error, $E_y[Err_in] $. In Lecture 5, we encountered this estimate as *Mallow's $C_p$*. Since ridge regression requires us to specify a tuning parameter, $\widehat{E_y[Err_{in}]}(\lambda)$ is a function of $\lambda$.
+Write a function that for each $\lambda$ in `lambda.seq` computes estimated $\widehat{E_y[Err_{in}]}(\lambda)$ (hint the formula is in the lecture slides), and use $\hat{\sigma}^2 = \frac{RSS}{n}$  as an estimate of $\sigma^2$.
+```{r }
+
+err.ridge <- function(X, y, lambda.seq){
+  n.lambda <- length(lambda.seq)
+  err <- rep(0, n.lambda)
+  N<-dim(X)[1]
+  p<-dim(X)[2]
+  
+  
+  OLS<-lm(lpsa~.-1,data=prostate.train)
+  R.OLS<-OLS$residuals
+  RSS.OLS<-sum((R.OLS)^2)
+  hatsigma<-RSS.OLS/(N-p)
+  
+  
+  RSS1 <-all.RSS
+  
+  
+    for(i in 1:n.lambda){
+    
+      RSS1[i] <- mean((y-X%*%beta.ridge(X,y,lambda.seq[i]))^2)
+      err[i]<-RSS1[i]+(2/N)*hatsigma*dfs.ridge(X, lambda.seq[i])
+      
+  }
+  return(err)
+}
+
+
+
+```
+### Task 1j)
+Use the function `err.ridge` to compute the estimated in-sample error as a function of degrees of freedom. Here we can use the estimated in-sample error for estimating the hyperparameter. From the $\widehat{E_y[Err_{in}]}(\lambda)$  select $\lambda$  in  `lambda.est`
+```{r }
+lambda.seq <- seq(0,5,length.out = 100)
+err <- err.ridge(X,y, lambda.seq)
+fig <- ggplot(data.frame(err=err, lambda=lambda.seq), aes(x=lambda)) + 
+  geom_line(aes(y=err)) 
+print(fig)
+
+lambda.est <- lambda.seq[which.min(err)]
+
+
+```
+
+
+## Part two: glmnet
+Now that you implemented your own ridge regression we are going learn how one can fit it in R using `glmnet`, the go-to library for lasso and ridge. In this part, you will fit both ridge and lasso on the data and familiarize yourself with the various functions in `glmnet`.
+First we load the library
+```{r  }
+library(glmnet)
+```
+### Task 2a)
+Fit ridge regression in `glmnet` for an equally spaced grid of 400 tuning parameter values $\lambda$ between 0 and 20 .
+To do this, read the help section for `glmnet` and estimate the ridge.regression model with 
+```{r  }
+
+lambda.seq <- seq(0,20,length.out=400)
+glm.obj <- glmnet(X, y, alpha=0, lambda=lambda.seq)
+plot(glm.obj,xvar='lambda')
+
+
+```
+
+### Task 2b)
+In `glmnet` one often fits the parameters using n-fold cross-valdiation. This is done by the function `cv.glmnet`. Here you should find a $\lambda$ for the ridge regression problem through 10-fold cross-valdiation with mean squared error as loss function. Read the first five pages of the introduction [https://rdrr.io/cran/glmnet/f/inst/doc/glmnet.pdf](intro glm). Also note that in glmnet one is choosing the $\lambda$ that minimizes $\frac{1}{2N} RSS + \frac{\lambda}{2}||\beta||_2^2$ which means that $\lambda$ here corresponds to $\frac{\lambda}{n}$ in task one.
+For `lambda.seq` use 100 equally spaced values between 0 and 2.
+```{r }
+set.seed(5)
+lambda.seq <- seq(0,2,length.out=100)
+glm.cv.obj.ridge <- cv.glmnet(X, y, alpha=0,lambda = lambda.seq, type.measure = "mse",intercept=FALSE)
+plot(glm.cv.obj.ridge)
+ridge.lambda.min <- glm.cv.obj.ridge$lambda.min
+ridge.coeff.lambda.min <- coef(glm.cv.obj.ridge,s = "lambda.min")
+
+
+
+fig2c_what_does_the_vertical_line_mean<- "There are two vertical dotted lines: Lambda min which is the value of λ that gives minimum mean cross-validated error, while lambda.1se
+is the value of λ that gives the most regularized model such that the cross-validated error is within one"  
+fig2c_what_does_the_bars_mean<- "the bars are the standard deviation curves along the λ sequence (error bars) for the cross validation curve (red dotted lines)"  
+```
+### Task 2d)
+It is beyond the scope of this course to derive a solver for the lasso problem. But one can again use  `glmnet` to find the parameters.
+We will go through the same step for the ridge regression but for lasso. First we fit the parameters on the full training data.
+
+```{r }
+glm.obj.lasso <- glmnet(X, y, alpha=1 , lambda = lambda.seq)
+plot(glm.obj.lasso,xvar='lambda')
+
+```
+### Task 2e) 
+To find the hyperparameter, $\lambda$, we again use 10-fold cross-validation with the help of `cv.glmnet` .
+```{r }
+set.seed(5)
+glm.cv.obj.lasso <- cv.glmnet(X, y,alpha=1, lambda = lambda.seq, type.measure = "mse",intercept=FALSE)
+plot(glm.cv.obj.lasso)
+lasso.lambda.min <- glm.cv.obj.lasso$lambda.min
+lasso.coeff.lambda.min <- coef(glm.cv.obj.lasso,s = "lambda.min")
+lasso.coeff.lambda.se <- coef(glm.cv.obj.lasso,s = "lambda.1se")
+```
+## Final part: model performance
+### Task 3a) 
+Now we are going to see how well our models perform on new data (i.e. test data). However, first we are going to center and scale the data using our old object `scaled.param`. The reason we don't scale with new data is that one does not have this information when doing the prediction (you can only demean data that you observed), if we would have done this we would in some sense be cheating.
+```{r }
+prostate.test <- prostate[train_index==F,]
+
+ prostate.test <- predict(scaled.param,prostate.test)
+ X.test <- model.matrix(lpsa~.-1,data=prostate.test)
+ y.test <- prostate.test$lpsa
+
+```
+### Task 3b) 
+Now you are going to compare the mean RSS for the model we fitted above. This we will do by using the predict function `predict` which you can read about with `help("predict.glmnet")`. Which model fitting method preformed best?
+``` {r }
+beta_ols <- solve(t(X)%*%X, t(X)%*%y)
+yhat_ols <- X.test%*%beta_ols
+yhat_ridge.min <- predict(glm.cv.obj.ridge, newx=X.test, s="lambda.min")
+yhat_lasso.min <- predict(glm.cv.obj.lasso, newx=X.test,  s="lambda.min")
+yhat_lasso.se <- predict(glm.cv.obj.lasso, newx=X.test, s="lambda.1se")
+RSS.ols <- mean((y.test - yhat_ols)^2)
+RSS.lasso.min <-  mean((y.test-yhat_lasso.min)^2)
+RSS.ridge.min <-  mean((y.test-yhat_ridge.min)^2)
+RSS.lasso.se <-  mean((y.test-yhat_lasso.se)^2)
+Which_was_the_best <- "The lasso.se was the model with the lowest RSS, therefore is the one that performed the best" 
+
+```
